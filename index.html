@@ -289,7 +289,7 @@ function doServe(){
   if(serveTeam===0){
     P[0].x=ball.x+12;P[0].y=ball.y;P[1].x=200;P[1].y=325;
     phase='aim';
-    msg('🖱️ Hold left click → release to serve! Long=hard  Short=soft');
+    msg('👆 Hold = Hard serve  |  Tap = Soft serve');
   } else {
     P[2].x=ball.x-12;P[2].y=ball.y;P[3].x=560;P[3].y=325;
     phase='cpuserve';waitFrames=55;
@@ -844,7 +844,7 @@ function update(){
       }
     });
   }
-  serveDefense();playerMove();cpuAI();stepAll();
+  serveDefense();playerMove();cpuAI();stepAll();stepRipples();
 }
 
 function stepAll(){
@@ -1068,6 +1068,7 @@ function draw(){
   ctx.beginPath();ctx.arc(ball.x,by,br,Math.PI+.2,2*Math.PI-.2);ctx.stroke();
   ctx.beginPath();ctx.moveTo(ball.x,by-br);ctx.lineTo(ball.x,by+br);ctx.stroke();
 
+  drawRipples();
   // Line call zoom inset — like Hawk-Eye/Cyclops
   if(lineCall && lineCall.life>0){
     lineCall.life--;
@@ -1160,80 +1161,102 @@ function draw(){
 
 // ─ Input ─────────────────────────────────────────────────────────
 function getXY(e){const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*(W/r.width),y:(e.clientY-r.top)*(H/r.height)};}
-cv.addEventListener('mousedown',e=>{if(e.button!==0)return;const p=getXY(e);hold={active:true,x:p.x,y:p.y,t:performance.now(),pct:0};});
-cv.addEventListener('mousemove',e=>{if(!hold.active)return;const p=getXY(e);hold.x=p.x;hold.y=p.y;});
-cv.addEventListener('mouseup',e=>{
-  if(e.button!==0||!hold.active)return;
-  const p=getXY(e);const held=performance.now()-hold.t;
-  hold.active=false;hold.pct=0;
-  const held_ms=Math.max(0,held-50);
-  const isHard=held_ms>200; // >200ms = sert smaç
-  const raw=Math.min(1,held_ms/600);
-  const vz=isHard?5:9; // plase=9 → high arc, hard to block
-  if(phase==='aim'){
-    // Allow targeting anywhere — ball can go out (service error)
-    const tx=serveTeam===0?p.x:p.x;
-    const ty=p.y;
-    if(isHard){
-      // Hard serve: low flat arc
-      ball.z=0;
-      const f3=Math.round(2*5/G); // vz=5, clears net but stays low
-      ball.vx=(tx-ball.x)/f3; ball.vy=(ty-ball.y)/f3; ball.vz=5;
-      ball.lastTeam=serveTeam; ball.live=true;
-      flameActive=true;
-    } else {
-      launch(tx,ty,vz,serveTeam); // soft serve normal arc
-    }
-    if(serveTeam===0) assignRoles('cpu',ty);else assignRoles('player',ty);
-    phase='play';hud();msg(raw>=0.85?'💥 Hard serve!':'🎯 Soft serve!');
-  } else if(phase==='play'&&pTouch<=2&&ball.x<NX){
-    // Smash only when ball on player side
-    // Allow targeting outside court
-    const tx=p.x;
-    const ty=p.y;
-    doHit(tx,ty,vz);
-  }
-});
+// ─ Touch/Mouse Controls (mobile-first) ──────────────────────────
+function getXY(e){
+  const r=cv.getBoundingClientRect();
+  return{x:(e.clientX-r.left)*(W/r.width),y:(e.clientY-r.top)*(H/r.height)};
+}
+
+// Touch ripple visual feedback
+let ripples=[];
+function addRipple(x,y,col){ripples.push({x,y,r:0,maxR:40,col:col||'rgba(255,255,255,0.6)',life:1});}
+function stepRipples(){ripples=ripples.filter(r=>{r.r+=4;r.life-=0.08;return r.life>0;});}
+function drawRipples(){
+  ripples.forEach(r=>{
+    ctx.save();ctx.globalAlpha=r.life*0.7;
+    ctx.strokeStyle=r.col;ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(r.x,r.y,r.r,0,Math.PI*2);ctx.stroke();
+    ctx.restore();
+  });
+}
+
+// Hold state (declared at top of script)
 let holdRight={active:false,t:0,x:0,y:0};
-cv.addEventListener('contextmenu',e=>{
-  e.preventDefault(); // prevent context menu always
-});
-cv.addEventListener('mousedown',e=>{
-  if(e.button===2){
-    const p=getXY(e);
-    holdRight={active:true,t:performance.now(),x:p.x,y:p.y};
-  }
-});
-cv.addEventListener('mouseup',e=>{
-  if(e.button!==2||!holdRight.active) return;
-  holdRight.active=false;
-  if(phase!=='play') return;
-  if(ball.x>=NX){msg('Cannot touch opponent side!');return;}
-  const p=getXY(e);
-  const held2=performance.now()-holdRight.t;
-  const isFast=held2>200; // long press = fast/flat, short = normal arc
-  doPass(p.x,p.y,isFast);
-});
-cv.addEventListener('touchstart',e=>{e.preventDefault();const t=e.touches[0],r=cv.getBoundingClientRect();hold={active:true,x:(t.clientX-r.left)*(W/r.width),y:(t.clientY-r.top)*(H/r.height),t:performance.now(),pct:0};},{passive:false});
-cv.addEventListener('touchmove',e=>{e.preventDefault();const t=e.touches[0],r=cv.getBoundingClientRect();hold.x=(t.clientX-r.left)*(W/r.width);hold.y=(t.clientY-r.top)*(H/r.height);},{passive:false});
-cv.addEventListener('touchend',e=>{
-  e.preventDefault();const t=e.changedTouches[0],r=cv.getBoundingClientRect();
-  const x=(t.clientX-r.left)*(W/r.width),y=(t.clientY-r.top)*(H/r.height);
-  const held=performance.now()-hold.t;hold.active=false;hold.pct=0;
-  const raw=Math.min(1,Math.max(0,(held-60)/640));const vz=8-raw*3;
+
+function onPressStart(x,y){
+  hold={active:true,x,y,t:performance.now(),pct:0};
+}
+function onPressMove(x,y){
+  if(hold.active){hold.x=x;hold.y=y;}
+}
+function onPressEnd(x,y){
+  if(!hold.active)return;
+  const held=performance.now()-hold.t;
+  hold.active=false;hold.pct=0;
+  const raw=Math.min(1,Math.max(0,(held-80)/600));
+  const isHard=held>200;
+  const vz=isHard?5:6;
+
   if(phase==='aim'){
-    const tx=serveTeam===0?Math.max(NX+30,Math.min(CX+CW-30,x)):Math.max(CX+20,Math.min(NX-20,x));
-    const ty=Math.max(CY+30,Math.min(CY+CH-30,y));
+    const tx=x, ty=y;
+    lastShotSpeed=raw*15;
     if(raw>=0.85){
       ball.z=0;const f3=Math.round(2*5/G);
       ball.vx=(tx-ball.x)/f3;ball.vy=(ty-ball.y)/f3;ball.vz=5;
       ball.lastTeam=serveTeam;ball.live=true;flameActive=true;
     } else { launch(tx,ty,vz,serveTeam); }
     if(serveTeam===0)assignRoles('cpu',ty);else assignRoles('player',ty);
+    isServeInFlight=true;serveReceived=false;
     phase='play';hud();
-  } else if(phase==='play'){doHit(x,y,vz);}
-  else if(phase==='play'&&pTouch===0){doPass(x,y);}
+    addRipple(tx,ty,isHard?'rgba(231,76,60,0.8)':'rgba(241,196,15,0.8)');
+  } else if(phase==='play'){
+    if(isHard){
+      // SPIKE — long press
+      doHit(x,y,vz);
+      addRipple(x,y,'rgba(231,76,60,0.9)');
+    } else {
+      // PAS — short tap
+      doPass(x,y);
+      addRipple(x,y,'rgba(52,152,219,0.8)');
+    }
+  }
+}
+
+// Mouse
+cv.addEventListener('mousedown',e=>{if(e.button===2)return;const p=getXY(e);onPressStart(p.x,p.y);});
+cv.addEventListener('mousemove',e=>{const p=getXY(e);onPressMove(p.x,p.y);});
+cv.addEventListener('mouseup',e=>{if(e.button===2)return;const p=getXY(e);onPressEnd(p.x,p.y);});
+cv.addEventListener('contextmenu',e=>{e.preventDefault();}); // disable right-click menu
+
+// Right-click still = fast pass
+cv.addEventListener('mousedown',e=>{if(e.button!==2)return;holdRight={active:true,t:performance.now(),x:0,y:0};});
+cv.addEventListener('mouseup',e=>{
+  if(e.button!==2||!holdRight.active)return;
+  holdRight.active=false;
+  if(phase!=='play')return;
+  const p=getXY(e);
+  const heldR=performance.now()-holdRight.t;
+  doPass(p.x,p.y,heldR>200);
+  addRipple(p.x,p.y,'rgba(46,204,113,0.8)');
+});
+
+// Touch
+cv.addEventListener('touchstart',e=>{
+  e.preventDefault();
+  const t=e.touches[0],r=cv.getBoundingClientRect();
+  onPressStart((t.clientX-r.left)*(W/r.width),(t.clientY-r.top)*(H/r.height));
 },{passive:false});
+cv.addEventListener('touchmove',e=>{
+  e.preventDefault();
+  const t=e.touches[0],r=cv.getBoundingClientRect();
+  onPressMove((t.clientX-r.left)*(W/r.width),(t.clientY-r.top)*(H/r.height));
+},{passive:false});
+cv.addEventListener('touchend',e=>{
+  e.preventDefault();
+  const t=e.changedTouches[0],r=cv.getBoundingClientRect();
+  onPressEnd((t.clientX-r.left)*(W/r.width),(t.clientY-r.top)*(H/r.height));
+},{passive:false});
+
 
 // ─ Loop ──────────────────────────────────────────────────────────
 function buildTeamSelect(){
