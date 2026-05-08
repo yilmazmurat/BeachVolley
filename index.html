@@ -41,7 +41,7 @@ button:active{transform:scale(.95)}
     <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;width:100%;max-width:280px;">
       <button id="btnSingle" onclick="startMode(false)" disabled style="padding:11px;border-radius:10px;border:none;background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.35);font-weight:700;font-size:14px;cursor:not-allowed;letter-spacing:.5px;transition:all .2s;">▶ PLAY SINGLE MATCH</button>
       <button id="btnTour" onclick="startMode(true)" disabled style="padding:11px;border-radius:10px;border:2px solid rgba(255,255,255,0.2);background:transparent;color:rgba(255,255,255,0.35);font-weight:700;font-size:14px;cursor:not-allowed;letter-spacing:.5px;transition:all .2s;">🏆 PLAY TOURNAMENT</button>
-      <div id="chooseHint" style="color:rgba(255,255,255,0.4);font-size:11px;text-align:center;margin-top:2px;">← Choose a team first</div>
+      <div id="chooseHint" style="color:rgba(255,255,255,0.4);font-size:11px;text-align:center;margin-top:2px;">Choose your team first ↑</div>
     </div>
     <div style="display:flex;gap:16px;align-items:center;margin-bottom:12px;background:rgba(255,255,255,0.06);padding:12px 18px;border-radius:10px;">
       <div style="color:#adf;font-size:11px;white-space:nowrap;">Points to win:</div>
@@ -341,6 +341,9 @@ function doHit(tx,ty,vz){
   if(ball.x>=NX){msg('Cannot touch opponent side!');return;}
   if(isServeInFlight&&serveTeam===0&&ball.x<NX){msg('Cannot touch your own serve!');return;}
   if(isServeInFlight&&serveTeam===1&&!serveReceived){msg('Cannot touch before receive!');return;}
+  // Check: closest player must be near ball
+  const dh0=dist(P[0],ball), dh1=dist(P[1],ball);
+  if(Math.min(dh0,dh1)>60){msg('Too far from ball!');return;}
   isServeInFlight=false;
   if(serveTeam===1) serveReceived=true;
   // Can't hit if already used 3 touches this rally
@@ -615,7 +618,7 @@ function point(winner,reason){
     if(sets[winner]>=setsToWin){
       // MATCH OVER
       phase='idle';
-      var qb2=document.getElementById('quitBtn'); if(qb2) qb2.style.display='none';
+      // Keep quit button visible after match so player can return to menu
       var bn=document.getElementById('bnext'); if(bn) bn.style.display='none';
 
       if(winner===0){
@@ -720,8 +723,8 @@ function update(){
     burst(ball.x,ball.y,'#eee',4);
   }
   // Touch resets
-  if(ball.lastTeam===0&&ball.x>NX){cTouch=0;cChaser=null;cSetter=null;cLastTouched=null;}
-  if(ball.lastTeam===1&&ball.x<NX){pTouch=0;pChaser=null;pSetter=null;pLastTouched=null;}
+  if(ball.lastTeam===0&&ball.x>NX){cTouch=0;cChaser=null;cSetter=null;cLastTouched=null;if(serveTeam===0)isServeInFlight=false;}
+  if(ball.lastTeam===1&&ball.x<NX){pTouch=0;pChaser=null;pSetter=null;pLastTouched=null;if(serveTeam===1)isServeInFlight=false;}
 
   // Block — only when smashing (touch===2), ONE blocker, cooldown
   if(ball.blockCD===0&&ball.live&&ball.z<60&&ball.isSmash){
@@ -1210,6 +1213,10 @@ function onPressEnd(x,y){
     phase='play';hud();
     addRipple(tx,ty,isHard?'rgba(231,76,60,0.8)':'rgba(241,196,15,0.8)');
   } else if(phase==='play'){
+    if(ball.x>=NX){
+      // Ball on opponent side — no action allowed
+      return;
+    }
     if(isHard){
       // SPIKE — long press
       doHit(x,y,vz);
@@ -1296,7 +1303,28 @@ function buildTeamSelect(){
     el.onmouseover=function(){this.style.borderColor=t.col;this.style.background='rgba(255,255,255,0.13)';this.style.transform='scale(1.03)';};
     el.onmouseout=function(){this.style.borderColor='rgba(255,255,255,0.14)';this.style.background='rgba(255,255,255,0.06)';this.style.transform='';};
     el.onclick=function(){
+      if(window._pickingCpu){
+        // Picking opponent
+        if(key===window._selectedTeam){msg('Choose a different team!');return;}
+        window._selectedCpu=key;
+        // Highlight opponent card in red
+        document.querySelectorAll('#teamgrid>div').forEach(function(d){
+          if(d._teamKey===window._selectedTeam){d.style.borderColor=TEAMS[window._selectedTeam].col;d.style.boxShadow='0 0 12px '+TEAMS[window._selectedTeam].col;}
+          else if(d._teamKey===key){d.style.borderColor='#e74c3c';d.style.boxShadow='0 0 12px #e74c3c';}
+          else{d.style.boxShadow='';d.style.borderColor='rgba(255,255,255,0.14)';}
+        });
+        document.getElementById('chooseHint').textContent='✓ '+TEAMS[window._selectedTeam].name+' vs '+t.name;
+        document.getElementById('chooseHint').style.color='#2ecc71';
+        // Enable single match button again
+        var bs=document.getElementById('btnSingle');
+        if(bs){bs.disabled=false;bs.style.background='#f1c40f';bs.style.color='#000';bs.style.cursor='pointer';}
+        window._pickingCpu=false;
+        return;
+      }
+      // Picking own team
+      window._selectedCpu=null; window._pickingCpu=false;
       document.querySelectorAll('#teamgrid>div').forEach(function(d){d.style.boxShadow='';d.style.borderColor='rgba(255,255,255,0.14)';});
+      this._teamKey=key;
       this.style.borderColor=t.col; this.style.boxShadow='0 0 12px '+t.col;
       window._selectedTeam=key;
       var bs=document.getElementById('btnSingle');
@@ -1304,8 +1332,10 @@ function buildTeamSelect(){
       var bh=document.getElementById('chooseHint');
       if(bs){bs.disabled=false;bs.style.background='#f1c40f';bs.style.color='#000';bs.style.cursor='pointer';}
       if(bt){bt.disabled=false;bt.style.borderColor='#f1c40f';bt.style.color='#f1c40f';bt.style.cursor='pointer';}
-      if(bh) bh.style.display='none';
+      if(bh){bh.style.display='block';bh.textContent='← Choose a team first';bh.style.color='rgba(255,255,255,0.4)';}
+      bh.style.display='none';
     };
+    el._teamKey=key;
     grid.appendChild(el);
   });
 }
@@ -1460,7 +1490,7 @@ function quitMatch(){
   $i('brestart').style.display='none';
   var bn=document.getElementById('bnext'); if(bn) bn.style.display='none';
   $i('teamsel').style.display='flex';
-  window._selectedTeam=null;
+  window._selectedTeam=null; window._selectedCpu=null; window._pickingCpu=false;
   var bs2=document.getElementById('btnSingle'),bt2=document.getElementById('btnTour'),bh2=document.getElementById('chooseHint');
   if(bs2){bs2.disabled=true;bs2.style.background='rgba(255,255,255,0.15)';bs2.style.color='rgba(255,255,255,0.35)';bs2.style.cursor='not-allowed';}
   if(bt2){bt2.disabled=true;bt2.style.borderColor='rgba(255,255,255,0.2)';bt2.style.color='rgba(255,255,255,0.35)';bt2.style.cursor='not-allowed';}
@@ -1472,13 +1502,27 @@ function quitMatch(){
 function startMode(isTournament){
   if(!window._selectedTeam){ return; }
   tournamentMode=isTournament;
+  if(!isTournament){
+    // Single match: need opponent selected too
+    if(!window._selectedCpu){
+      // Enter "pick opponent" mode
+      window._pickingCpu=true;
+      document.getElementById('chooseHint').style.display='block';
+      document.getElementById('chooseHint').textContent='Now pick your OPPONENT';
+      document.getElementById('chooseHint').style.color='#e74c3c';
+      document.getElementById('btnSingle').style.background='rgba(255,255,255,0.15)';
+      document.getElementById('btnSingle').style.color='rgba(255,255,255,0.35)';
+      document.getElementById('btnSingle').disabled=true;
+      return;
+    }
+  }
   selectTeam(window._selectedTeam);
 }
 
 function selectTeam(key){
   playerTeam=TEAMS[key];
   const others=Object.keys(TEAMS).filter(k=>k!==key);
-  cpuTeam=TEAMS[others[Math.floor(Math.random()*others.length)]];
+  if(!tournamentMode&&window._selectedCpu&&TEAMS[window._selectedCpu]){ cpuTeam=TEAMS[window._selectedCpu]; } else { cpuTeam=TEAMS[others[Math.floor(Math.random()*others.length)]]; }
   PSPD=2.2*(playerTeam.spd/7);
   CSPD=2.2*(cpuTeam.spd/7);
   DSPD=3.8*(playerTeam.spd/7);
